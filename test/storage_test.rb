@@ -60,8 +60,7 @@ class StorageTest < Test::Unit::TestCase
       rails_env("not really an env")
       assert_equal({:test => "12345"}, @avatar.parse_credentials(:test => "12345"))
     end
-  end
-
+  end  
   context "" do
     setup do
       AWS::S3::Base.stubs(:establish_connection!)
@@ -374,16 +373,40 @@ class StorageTest < Test::Unit::TestCase
                       :storage => :s3,
                       :bucket => ENV["S3_TEST_BUCKET"],
                       :path => ":class/:attachment/:id/:style.:extension",
-                      :s3_credentials => File.new(File.join(File.dirname(__FILE__), "s3.yml"))
+                      :s3_credentials => File.new(File.join(File.dirname(__FILE__), "fixtures/s3.yml"))
 
         Dummy.delete_all
         @dummy = Dummy.new
-      end
+      end      
 
       should "be extended by the S3 module" do
         assert Dummy.new.avatar.is_a?(Paperclip::Storage::S3)
       end
 
+      context "using Reduced Redundancy" do
+        setup do
+          rebuild_model :storage => :s3,
+                        :styles => { :thumbnail => "16x16", :other => "64x64" },
+                        :s3_credentials => File.new(File.join(File.dirname(__FILE__), "fixtures/s3.yml")),
+                        :bucket => ENV["S3_TEST_BUCKET"],
+                        :path => "rrs_sample/:basename-:style.:extension",
+                        :s3_reduced_redundancy => [:thumbnail]
+          Dummy.delete_all
+          @dummy = Dummy.new
+          @dummy.avatar = File.open(File.join(File.dirname(__FILE__), "fixtures", "5k.png"))
+        end
+
+        should "flag only 'thumbnail'" do
+          # 'x-amz-storage-class' is never retrieved on object headers
+          # we have to query the bucket instead! https://forums.aws.amazon.com/thread.jspa?threadID=50536
+          # thus this test will FAIL for now :(
+          @dummy.save
+          assert_equal 'REDUCED_REDUNDANCY', AWS::S3::S3Object.find(@dummy.avatar.path(:thumbnail), ENV["S3_TEST_BUCKET"]).about['x-amz-storage-class']
+          assert_nil AWS::S3::S3Object.find(@dummy.avatar.path(:other), ENV["S3_TEST_BUCKET"]).about['x-amz-storage-class']
+          assert_nil AWS::S3::S3Object.find(@dummy.avatar.path(:original), ENV["S3_TEST_BUCKET"]).about['x-amz-storage-class']
+        end
+      end
+      
       context "when assigned" do
         setup do
           @file = File.new(File.join(File.dirname(__FILE__), 'fixtures', '5k.png'), 'rb')

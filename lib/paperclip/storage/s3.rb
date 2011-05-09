@@ -74,6 +74,7 @@ module Paperclip
           @s3_protocol    = @options[:s3_protocol]    || (@s3_permissions == :public_read ? 'http' : 'https')
           @s3_headers     = @options[:s3_headers]     || {}
           @s3_host_alias  = @options[:s3_host_alias]
+          @s3_use_rrs     = Array(@options[:s3_reduced_redundancy])
           unless @url.to_s.match(/^:s3.*url$/)
             @path          = @path.gsub(/:url/, @url)
             @url           = ":s3_path_url"
@@ -143,14 +144,17 @@ module Paperclip
 
       def flush_writes #:nodoc:
         @queued_for_write.each do |style, file|
-          begin
+          begin        
+            
+            headers = { :content_type => instance_read(:content_type),
+                        :access => @s3_permissions }            
+            headers['x-amz-storage-class'] = 'REDUCED_REDUNDANCY' if @s3_use_rrs.include?(style)
+   
             log("saving #{path(style)}")
             AWS::S3::S3Object.store(path(style),
                                     file,
                                     bucket_name,
-                                    {:content_type => instance_read(:content_type),
-                                     :access => @s3_permissions,
-                                    }.merge(@s3_headers))
+                                    headers.merge(@s3_headers))
           rescue AWS::S3::NoSuchBucket => e
             create_bucket
             retry
